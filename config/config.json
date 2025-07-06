@@ -1,0 +1,27 @@
+{
+    "llm": {
+        "base_url": "http://127.0.0.1:8080",
+        "token": "",
+        "proxy_host_port": ""
+    },
+    "ui": {
+        "width": 960,
+        "height": 640,
+        "title": "Chat LLM",
+        "fonts": {
+            "size": 13.0,
+            "default": "fonts/MonaspaceRadonVarVF[wght,wdth,slnt].ttf",
+            "addition": [
+                {
+                    "language": "chinese",
+                    "file": "fonts/LXGWWenKai-Regular.ttf"
+                },
+                {
+                    "language": "emoji",
+                    "file": "fonts/seguiemj.ttf"
+                }
+            ]
+        }
+    },
+    "verbose": false
+}
