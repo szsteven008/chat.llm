@@ -69,8 +69,8 @@ make -j
 MIT License. 
 
 ## ❤️ Credits
-• llama.cpp by Georgi Gerganov
-• Qwen3 by Alibaba Group
-• Dear ImGui by Omar Cornut
-• json by Niels Lohmann
-• utfcpp by Nemanja Trifunovic
+	• llama.cpp by Georgi Gerganov
+	• Qwen3 by Alibaba Group
+	• Dear ImGui by Omar Cornut
+	• json by Niels Lohmann
+	• utfcpp by Nemanja Trifunovic
