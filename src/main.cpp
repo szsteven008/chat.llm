@@ -586,6 +586,7 @@ void list_models(std::vector<std::string>& m) {
             m.push_back(item.path().stem());
         }
     }
+    if (m.size() > 0) user_state.model = m[0];
 }
 
 void list_prompts(std::unordered_map<std::string, std::string>& m) {
