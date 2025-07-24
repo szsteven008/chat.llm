@@ -5,7 +5,7 @@
         "proxy_host_port": ""
     },
     "ui": {
-        "width": 960,
+        "width": 1020,
         "height": 640,
         "title": "Chat LLM",
         "fonts": {
@@ -23,5 +23,20 @@
             ]
         }
     },
-    "verbose": false
+    "server": {
+        "on": true, 
+        "bin": "tools/llama-server",
+        "args": [
+            "--model", "models/Qwen3-0.6B-Q8_0.gguf", 
+            "--ctx-size", "2048",
+            "--jinja"
+        ]
+    },
+    "verbose": true,
+    "mcp": [
+        {
+            "name": "deepwiki",
+            "url": "https://mcp.deepwiki.com/mcp"
+        }
+    ]
 }
