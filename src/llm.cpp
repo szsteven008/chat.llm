@@ -2,12 +2,15 @@
 #include "openai.h"
 #include <chrono>
 #include <exception>
+#include <format>
 #include <mutex>
+#include <nlohmann/json_fwd.hpp>
 #include <string>
 #include <thread>
+#include <vector>
 
 int LLM::init(const nlohmann::json& config, llama_generate_callback func, 
-    const bool verbos /* = false */) {
+    llama_tool_callback tool_func, const bool verbos /* = false */) {
     base_url = config.value("base_url", 
         "http://127.0.0.1:8080");
     std::string token = config.value("token", "");
@@ -16,7 +19,7 @@ int LLM::init(const nlohmann::json& config, llama_generate_callback func,
     openai::start(base_url, token, proxy_host_port, 
         verbos);
 
-    llama_thread = std::thread([this, func]() {
+    llama_thread = std::thread([this, func, tool_func]() {
         llama_thread_running = true;
 
         auto health_check = []() {
@@ -34,10 +37,10 @@ int LLM::init(const nlohmann::json& config, llama_generate_callback func,
         status = health_check() ? idle : none;
 
         auto chat_create = [](const nlohmann::json& req) {
-            std::string result = "";
+            nlohmann::json result = {};
             try {
                 auto response = openai::chat().create(req);
-                result = response["choices"][0]["message"]["content"].get<std::string>();
+                result = response["choices"][0];
             } catch(std::exception& e) {
                 std::cerr << "Error during LLM generation: " << e.what() << std::endl;
             }
@@ -64,9 +67,44 @@ int LLM::init(const nlohmann::json& config, llama_generate_callback func,
                 req = std::move(request);
             }
 
-            std::string result = chat_create(req);
-            status = idle;
-            if (func) func(result);
+            nlohmann::json result = chat_create(req);
+            if (result.contains("finish_reason") && result.contains("message")) {
+                std::string finish_reason = result["finish_reason"].get<std::string>();
+                if (finish_reason == "tool_calls") {
+                    nlohmann::json& message = result["message"];
+                    if (message.contains("tool_calls")) {
+                        std::vector<nlohmann::json> tool_calls = 
+                            message["tool_calls"].get<std::vector<nlohmann::json>>();
+                        auto& messages = req["messages"];
+                        messages.push_back(message);
+                        for (auto& tool: tool_calls) {
+                            nlohmann::json tool_call_result;
+                            tool_call_result["role"] = "tool";
+                            tool_call_result["tool_call_id"] = tool["id"].get<std::string>();
+                            tool_call_result["content"] = tool_func(tool);
+                            messages.push_back(tool_call_result);
+                        }
+//                        std::cout << "req: " << req.dump('\t') << std::endl;
+                        generate(req);
+                    }
+                } else {
+                    std::string content = "";
+                    nlohmann::json& message = result["message"];
+                    if (message.contains("reasoning_content")) {
+                        content += std::format("<think>{}</think>\n\n", 
+                            message["reasoning_content"].get<std::string>());
+                    }
+                    if (message.contains("content")) {
+                        content += message["content"].get<std::string>();
+                    }
+
+                    status = idle;
+                    if (func) func(content);
+                }
+            } else {
+                std::cout << "unsupported: " << result.dump('\t') << std::endl;
+                status = idle;
+            }
         }
     });
     return 0;

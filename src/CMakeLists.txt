@@ -26,6 +26,8 @@ find_library(SECURITY_FRAMEWORK Security)
 
 set(TARGET_SOURCE_FILES main.cpp
         llm.cpp 
+        server.cpp 
+        tools.cpp 
         ${IMGUI_SOURCE_FILES}
         ${IMGUIFILEDIALOG_SOURCE_FILES}
 )
@@ -33,6 +35,7 @@ add_executable(chat-llm ${TARGET_SOURCE_FILES})
 
 target_link_libraries(chat-llm 
         boost_program_options
+        boost_process
         ${IMGUI_LIBS}
         crypto
         ssl

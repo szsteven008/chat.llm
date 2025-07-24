@@ -1,11 +1,11 @@
 #include "utf8/checked.h"
 #include <algorithm>
+#include <cfloat>
 #include <fstream>
 #include <iostream>
 #include <boost/program_options.hpp>
 #include <iterator>
 #include <nlohmann/json_fwd.hpp>
-#include <streambuf>
 #include <string>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
@@ -22,10 +22,14 @@
 #include "fpdfview.h"
 #include "fpdf_text.h"
 
+#include "server.h"
 #include "llm.h"
 #include "message.h"
+#include "tools.h"
 
+static Server& server = Server::instance();
 static LLM& llm = LLM::instance();
+static LLMTools& llmtools = LLMTools::instance();
 
 typedef struct _user_state_t {
     //style
@@ -34,6 +38,8 @@ typedef struct _user_state_t {
     //data
     std::vector<std::string> models;
     std::unordered_map<std::string, std::string> prompts;
+    std::vector<std::string> tool_names;
+    std::vector<unsigned char> tool_status;
 
     //messages view
     chat_messages_t chat_messages;
@@ -366,6 +372,23 @@ static auto chat_message = [](const ImVec2& pos,
                     {{"role", "user"}, 
                         {"content", restore_string(buf)}}
                 };
+
+                std::vector<nlohmann::json> tools;
+                for (int i=0; i<user_state.tool_names.size(); ++i) {
+                    if (user_state.tool_status[i]) {
+                        std::string name = user_state.tool_names[i];
+                        nlohmann::json tool = {
+                            {"type", "function"},
+                            {"function", {
+                                {"name", llmtools[name]["name"]},
+                                {"description", llmtools[name]["description"]},
+                                {"parameters", llmtools[name]["parameters"]}
+                            }}
+                        };
+                        tools.push_back(tool);
+                    }
+                }
+                if (tools.size() > 0) request["tools"] = tools;
                 llm.generate(request);
 
                 chat_message_t message{"user", buf};
@@ -388,6 +411,69 @@ static auto chat_message = [](const ImVec2& pos,
         ImGui::EndDisabled();
         show_edit_message();
     });
+};
+
+static auto tab_system_prompt = [](int width) {
+    ImGui::SetNextItemWidth(width);
+    static std::string prompt_selected = "default";
+    const char * preview_prompt = prompt_selected.c_str();
+    if (ImGui::BeginCombo("##prompts", preview_prompt)) {
+        for (auto const& [key, value]: user_state.prompts) {
+            bool is_selected = (key == prompt_selected);
+            if (ImGui::Selectable(key.c_str(), is_selected)) {
+                prompt_selected = key;
+                user_state.system_prompt = value;
+            }
+            if (is_selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, 
+        ImVec4{.8f, .8f, .8f, .2f});
+    ImGui::BeginChild("##system-prompt", 
+        {0, 0}, 
+        ImGuiChildFlags_FrameStyle, 
+        ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    ImGui::TextWrapped("%s", user_state.system_prompt.c_str());
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+};
+
+static void help_marker(const char * id, const char * desc) {
+    ImGui::PushID(std::format("help_{}", id).c_str());
+    ImGui::PushStyleColor(ImGuiCol_Button, 
+        (ImVec4)ImColor::HSV(2.0 / 7.0f, 0.6f, 0.6f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, 
+        (ImVec4)ImColor::HSV(2.0 / 7.0f, 0.7f, 0.7f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, 
+        (ImVec4)ImColor::HSV(2.0 / 7.0f, 0.8f, 0.8f));
+    if (ImGui::Button("?")) {
+        ImGui::OpenPopup(id);
+    }
+    bool unused_open = true;
+    ImGui::SetNextWindowSize({640.f, 320.f});
+    if (ImGui::BeginPopupModal(id, &unused_open, 
+            ImGuiWindowFlags_NoResize)) {
+        ImGui::TextUnformatted(desc);
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleColor(3);
+    ImGui::PopID();
+}
+
+static auto tab_tools = [](int width) {
+    if (ImGui::BeginChild("##tools")) {
+        for (int i=0; i<user_state.tool_names.size(); ++i) {
+            std::string name = user_state.tool_names[i];
+            std::string desc = llmtools[name].dump('\t');
+            ImGui::Checkbox(name.c_str(), 
+                reinterpret_cast<bool *>(&user_state.tool_status[i]));
+            ImGui::SameLine();
+            help_marker(name.c_str(), desc.c_str());
+        }
+        ImGui::EndChild();
+    }
 };
 
 static auto llama = [](const ImVec2& pos, 
@@ -445,31 +531,17 @@ static auto llama = [](const ImVec2& pos,
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::SeparatorText("System Prompt");
-        ImGui::SetNextItemWidth(size.x);
-        static std::string prompt_selected = "default";
-        const char * preview_prompt = prompt_selected.c_str();
-        if (ImGui::BeginCombo("##prompts", preview_prompt)) {
-            for (auto const& [key, value]: user_state.prompts) {
-                bool is_selected = (key == prompt_selected);
-                if (ImGui::Selectable(key.c_str(), is_selected)) {
-                    prompt_selected = key;
-                    user_state.system_prompt = value;
-                }
-                if (is_selected) ImGui::SetItemDefaultFocus();
+        if (ImGui::BeginTabBar("##TabBar")) {
+            if (ImGui::BeginTabItem("System Prompt")) {
+                tab_system_prompt(size.x);
+                ImGui::EndTabItem();
             }
-            ImGui::EndCombo();
+            if (ImGui::BeginTabItem("Tools")) {
+                tab_tools(size.x);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
         }
-
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, 
-            ImVec4{.8f, .8f, .8f, .2f});
-        ImGui::BeginChild("##system-prompt", 
-            {0, 0}, 
-            ImGuiChildFlags_FrameStyle, 
-            ImGuiWindowFlags_AlwaysVerticalScrollbar);
-        ImGui::TextWrapped("%s", user_state.system_prompt.c_str());
-        ImGui::EndChild();
-        ImGui::PopStyleColor();
     });
 };
 
@@ -613,10 +685,28 @@ void list_prompts(std::unordered_map<std::string, std::string>& m) {
     user_state.system_prompt = m["default"];
 }
 
-int main(int argc, char *argv[]) {
-    std::ofstream out("log.txt");
-    std::streambuf * cout_buf = std::cout.rdbuf();
+static auto llm_generate_callback = 
+    [](const std::string& result) {
+    chat_message_t message {"assistant", result};
+    user_state.chat_messages.push(message);
+};
 
+static auto llm_tool_callback = 
+    [](const nlohmann::json& func) {
+    std::cout << "llm_tool_callback: " << func.dump('\t') << std::endl;
+    std::string result = "";
+    try {
+        std::string name = func["function"]["name"].get<std::string>();
+        std::string arguments = func["function"]["arguments"].get<std::string>();
+        nlohmann::json argv = nlohmann::json::parse(arguments);
+        result = llmtools.response(name, argv);
+    } catch (nlohmann::json::exception& e) {
+        std::cout << "llm_tool_callback exception: " << e.what() << std::endl;
+    }
+    return result;
+};
+
+int main(int argc, char *argv[]) {
     namespace po = boost::program_options;
     po::options_description desc("Allowed Options");
     desc.add_options()
@@ -642,27 +732,35 @@ int main(int argc, char *argv[]) {
         f.close();
     }
 
-    bool verbose = config.value("verbose", false);
-    if (verbose) std::cout.rdbuf(out.rdbuf());
+    if (server.init(config["server"])) {
+        std::cout << "fail to start llama-server." << std::endl;
+        return -1;
+    }
 
     list_models(user_state.models);
     list_prompts(user_state.prompts);
-
+    
     FPDF_InitLibrary();
 
     SDL_Window * window = ui_create(config["ui"]);
     if (!window) {
         std::cout << "fail to create window." << std::endl;
+        server.shutdown();
         return -1;
     }
 
     //test data
     //set_test_data(user_state.chat_messages);
+
+    bool verbose = config.value("verbose", false);
     llm.init(config["llm"], 
-        [](const std::string& result){
-            chat_message_t message {"assistant", result};
-            user_state.chat_messages.push(message);
-        }, verbose);
+        llm_generate_callback, 
+        llm_tool_callback, 
+        verbose);
+    llmtools.init(config["mcp"]);
+    user_state.tool_names = llmtools.names();
+    user_state.tool_status = 
+        std::vector<unsigned char>(user_state.tool_names.size(), false);
 
     bool done = false;
     while (!done) {
@@ -674,10 +772,6 @@ int main(int argc, char *argv[]) {
                 ev.window.windowID == SDL_GetWindowID(window)) done = true;
             if (ev.type == SDL_EVENT_TEXT_EDITING) {
                 user_state.edit_message = ev.edit.text;
-//                user_state.edit_message.erase(
-//                    std::remove(user_state.edit_message.begin(), 
-//                        user_state.edit_message.end(), ' '), 
-//                    user_state.edit_message.end());
             }
             if (ev.type == SDL_EVENT_TEXT_INPUT) {
                 user_state.edit_message.clear();
@@ -702,6 +796,7 @@ int main(int argc, char *argv[]) {
         SDL_GL_SwapWindow(window);
     }
 
+    server.shutdown();
     llm.shutdown();
 
     ImGui_ImplOpenGL3_Shutdown();
@@ -715,6 +810,5 @@ int main(int argc, char *argv[]) {
     FPDF_DestroyLibrary();
 
     std::cout << "main exit!" << std::endl;
-    if (verbose) std::cout.rdbuf(cout_buf);
     return 0;
 }

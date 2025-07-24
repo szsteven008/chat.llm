@@ -1,11 +1,13 @@
 #pragma once
 
 #include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <thread>
 
-typedef void (* llama_generate_callback)(const std::string&);
+typedef std::function<void (const std::string&)> llama_generate_callback;
+typedef std::function<std::string (const nlohmann::json&)> llama_tool_callback;
 class LLM {
 public:
     static LLM& instance() {
@@ -17,6 +19,7 @@ public:
     LLM& operator=(const LLM&) = delete;
 
     int init(const nlohmann::json& config, llama_generate_callback func, 
+        llama_tool_callback tool_func, 
         const bool verbos = false);
     int shutdown();
     int generate(const nlohmann::json& req);
